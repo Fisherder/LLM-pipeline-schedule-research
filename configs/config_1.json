@@ -1,0 +1,10 @@
+{
+  "n": [8],
+  "sync_freq": [2],
+  "fwd_len": [1.0],
+  "bwd_len": { "start": 2.0, "stop": 2.0, "step": 0.5 },
+  "prop_len": { "start": 1.0, "stop": 1.0, "step": 0.5 },
+  "sync_base_len": { "start": 2.0, "stop": 2.0, "step": 0.5 },
+  "fwd_impact": { "start": 0.2, "stop": 0.2, "step": 0.1 },
+  "bwd_impact": { "start": 0.2, "stop": 0.2, "step": 0.1 }
+}
