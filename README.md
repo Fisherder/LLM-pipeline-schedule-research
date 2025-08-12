@@ -2,224 +2,204 @@
 
 ## 第1章：项目概述
 
-本项目是一个用于**模拟、分析和可视化**大规模语言模型训练中 **1F1B 流水线并行 (Pipeline Parallelism)** 调度策略的综合工具链。它旨在通过高精度的、事件驱动的模拟，精确复现多GPU环境下的计算与通信调度，揭示性能瓶-颈，并为设计更优的调度策略提供量化的数据支持和直观的洞察。
+本项目是一个用于模拟、分析与可视化大规模语言模型训练中两类典型流水线调度策略的综合工具链：
 
-整个工具链由五个核心Python脚本构成，它们协同工作，形成了一个从参数配置、数据生成到结果可视化的完整自动化流程。
+- 1F1B（One-Forward-One-Backward，前后交替）
+- GPipe（先全部前向，再全部反向，F-then-B）
+
+通过高精度、事件驱动的模拟，项目精确复现多 GPU 环境下的计算与通信调度，揭示性能瓶颈，并为调度策略设计提供量化数据与直观洞察。工具链覆盖从参数配置、批量数据生成、指标提取，到多种可视化（甘特图、热力图、网络负载曲线）的完整流程。
 
 ### 1.1 工具链构成
 
-1. **核心模拟器 (Simulators)**:
-   - `schedule_visualizer_single_channel.py`
-   - `schedule_visualizer_duel_channel.py`
-   - 这两个脚本是整个项目的“心脏”，负责执行高精度的1F1B流水线调度模拟。它们共享完全相同的底层计算逻辑，唯一的区别在于最终生成甘特图的可视化风格。
-2. **数据生成器 (Data Generator)**:
-   - `data_generator.py`
-   - 这是一个强大的批量实验工具，能够根据用户指定的参数配置文件（JSON格式），系统性地遍历数万乃至数百万种不同的实验配置组合，并利用多进程并行计算来高速生成性能数据。
-3. **性能可视化器 (Visualizer)**:
-   - `plot_heatmap.py`
-   - 这个脚本负责将数据生成器产出的海量数据进行可视化。它能自动为每一个独立的实验配置生成一张信息丰富的热力图，直观地展示不同通信优先级策略对流水线完成时间的影响。
-4. **自动化流程管理 (Orchestrator)**:
-   - `run_full_pipeline.py`
-   - 这是推荐用户使用的**主入口脚本**。它将数据生成和性能可视化两个步骤串联起来，实现了一键式的“配置 -> 运行 -> 出图”全自动化流程。
+- 核心模拟器（Simulators）
+  - 1F1B：
+    - `schedule_visualizer_1f1b_single_channel.py`
+    - `schedule_visualizer_1f1b_duel_channel.py`（文件名历史拼写为“duel”，命令行参数同时兼容 `dual/duel`）
+    - `schedule_visualizer_1f1b_ideal.py`（理想、互不争用的通道模型）
+  - GPipe：
+    - `schedule_visualizer_gpipe_single_channel.py`
+    - `schedule_visualizer_gpipe_duel_channel.py`
+    - `schedule_visualizer_gpipe_ideal.py`
+  - 说明：single_channel 与 duel/dual_channel 的差异主要体现在“可视化布局”，底层通信仍在同一物理通道上竞争资源；ideal 版本用于对照，不建模资源争用与计算降速影响。
+
+- 数据生成（Generators）
+  - `data_generator.py`：扫描共享/独占优先级组合，批量生成“总完成时间”CSV。
+  - `generate_metrics.py`：在上述基础上进一步计算通信/计算比、吞吐、延迟、资源利用率等指标，输出更丰富的指标 CSV。
+
+- 可视化（Visualizers）
+  - `plot_heatmap.py`：读取 `data_generator.py` 输出的 CSV，按配置分组批量绘制“总完成时间”热力图。
+  - `plot_metrics_heatmaps.py`：读取 `generate_metrics.py` 的指标 CSV，为多种指标（如 `total_time`、`avg_latency`、`compute_utilization` 等）分别生成热力图，并以红色标注最优格。
+  - `make_network_load_plots.py`：直接调用单通道模拟器，统计并绘制通信带宽随时间的占用曲线（总占用与分任务占用）。
+
+- 自动化编排（Orchestrator）
+  - `run_full_pipeline.py`：推荐的主入口脚本，一键完成“数据生成 -> 热力图绘制”。
 
 ### 1.2 功能亮点
 
-- **高精度模拟**: 精确建模了计算/通信资源竞争、跨GPU数据依赖、网络拥塞反压、以及多种优先级调度策略。
-- **高度可配置**: 几乎所有环境变量（任务长度、网络干扰、梯度累积频率等）和调度策略（共享优先级、主动独占优先级）都可以通过配置文件进行灵活调整。
-- **高性能计算**: 数据生成器采用多进程并行计算，能够充分利用现代CPU的多核性能，大幅缩短大规模实验的耗时。
-- **自动化与批量处理**: 能够无人值守地完成从参数配置到生成数十上百张热力图的完整分析流程。
-- **信息丰富的可视化**: 最终产出的热力图能够在一个视图中同时展示共享优先级和独占优先级对系统性能的影响，为性能分析提供了极大的便利。
+- 高精度模拟：精确建模计算/通信资源竞争、跨 GPU 数据依赖、网络拥塞反压、主动独占与共享优先级等。
+- 高度可配置：任务长度、网络干扰、梯度累积频率以及优先级策略均可通过 JSON 配置灵活调整。
+- 高性能计算：多进程并行生成数据，充分利用多核 CPU，大幅加速大规模实验。
+- 自动化与批量处理：从参数配置到批量出图的全流程自动化。
+- 信息丰富的可视化：甘特图、热力图、网络负载等多视角展示调度行为与性能结果。
 
-## 第2章：核心概念解析
+## 第2章：核心概念
 
-在开始使用本工具链之前，理解以下几个核心概念至关重要。
+- 1F1B：流水线填满后，前向与反向在各阶段交替执行，减少“气泡”（空闲时间）。
+- 资源通道模型：每个 GPU 拥有计算与通信两个物理通道；计算通道独占、通信通道共享。
+- 优先级体系：
+  - 主动独占（Active Exclusive）：在 `default_exclusive_tiers` 中以字母分级（'a' > 'b' > ...），就绪即独占带宽。
+  - 普通共享（Shared）：在 `default_priorities` 中用 0~1 权重，按比例共享带宽。
+  - 零优先级：仅当无独占且无共享任务时才均分带宽。
+- 网络效应建模：
+  - `fwd_impact` / `bwd_impact`：梯度同步对计算效率的影响系数。
+  - 接收端拥塞控制：当入向流量超载时，对发送端带宽进行反压与再分配（1F1B 单通道脚本支持开关）。
 
-### 2.1 1F1B (One Forward, One Backward)
+## 第3章：标准工作流程（推荐）
 
-当前最高效的流水线调度策略之一。其核心思想是通过精细的调度，使得每个GPU在大部分时间内都在交替执行一次前向计算（Forward）和一次反向计算（Backward），从而最大限度地减少流水线“气泡”（即设备空闲时间）。
+### 步骤 1：准备 JSON 配置
 
-### 2.2 资源通道模型
-
-为了精确模拟，我们将每个GPU抽象为两个核心的物理资源通道：
-
-- **计算通道 (Compute Channel)**: 代表GPU的计算核心。这是一个**独占性、串行**资源，在任何时刻只能被一个计算任务（`forward`或`backward`）占用。
-- **通信通道 (Communication Channel)**: 代表GPU的物理网口。这是一个**共享性、并行**资源，在任何时刻可以被多个通信任务（`fwd_prop`, `grad_prop`, `grad_sync`）根据其优先级按比例共享带宽。
-
-### 2.3 优先级调度系统
-
-这是我们模型中最核心、最复杂的调度逻辑，它分为三个层次：
-
-1. **主动独占优先级 (Active Exclusive Priority)**:
-   - **定义**: 在 `exclusive_tiers` 字典中用字母（'a', 'b', 'c'...）指定。字母序越靠前，等级越高。
-   - **行为**: 拥有独占优先级的任务是**抢占式**的。只要有一个就绪的独占任务存在，所有其他任务（包括等级较低的独占任务和所有普通任务）都必须等待。该任务将**独占100%**的通信带宽直至完成。
-2. **普通共享优先级 (Shared Priority)**:
-   - **定义**: 在 `priorities` 字典中用0到1的小数指定。
-   - **行为**: 当通道上没有独占任务时，所有拥有普通共享优先级的就绪任务将**按其数值比例瓜分**通信带宽，并行执行。
-3. **零优先级 (Zero Priority)**:
-   - **定义**: `priorities` 字典中值为0的任务。
-   - **行为**: 这是最低的优先级。只有当通道上既没有独占任务，也没有普通共享任务时，所有零优先级的就绪任务才会开始执行，并**均分**通信带宽。
-
-### 2.4 网络效应建模
-
-- **跨设备干扰 (`impact`)**: 模拟了当通信任务（特别是`grad_sync`）运行时，会占用内存总线等资源，从而降低并行计算任务效率的现象。通过 `fwd_impact` 和 `bwd_impact` 参数来量化。
-- **接收端拥塞控制**: 精确模拟了当一个GPU的入向网络流量（来自上游的`fwd_prop` + 来自下游的`grad_prop`）超过其接收能力时，会向上游发送方施加“反压”，动态调整其发送速率的拥塞控制机制。
-
-## 第3章：标准工作流程 (推荐)
-
-我们强烈推荐您使用以下三步走的自动化流程来进行实验。
-
-### 步骤 1: 创建参数配置文件 (JSON)
-
-首先，您需要创建一个JSON文件来定义您想要研究的所有实验参数。这是一个功能完备的示例 `my_experiment_config.json`：
+示例 `configs/config_1.json` 结构：
 
 ```
 {
-  "n": [8, 16],
-  "sync_freq": [1, 2, 4],
+  "n": [8],
+  "sync_freq": [2],
   "fwd_len": [1.0],
-  "bwd_len": {
-    "start": 2.0,
-    "stop": 3.0,
-    "step": 0.5
-  },
-  "prop_len": [1.0],
-  "sync_base_len": [2.0],
-  "fwd_impact": [0.2],
-  "bwd_impact": [0.2]
+  "bwd_len": { "start": 2.0, "stop": 2.0, "step": 0.5 },
+  "prop_len": { "start": 1.0, "stop": 1.0, "step": 0.5 },
+  "sync_base_len": { "start": 2.0, "stop": 2.0, "step": 0.5 },
+  "fwd_impact": { "start": 0.2, "stop": 0.2, "step": 0.1 },
+  "bwd_impact": { "start": 0.2, "stop": 0.2, "step": 0.1 }
 }
 ```
 
-- **列表形式**: `[8, 16]` 表示对 `n` 这个变量，将测试 `8` 和 `16` 这两个离散值。
-- **字典形式**: `{"start": 2.0, "stop": 3.0, "step": 0.5}` 表示对 `bwd_len` 这个变量，将从 `2.0` 到 `3.0`，以 `0.5` 为步长进行扫描（即测试 `2.0`, `2.5`, `3.0`）。
-
-### 步骤 2: 一键执行全流程
-
-打开您的终端，运行 `run_full_pipeline.py` 脚本，并指向您刚刚创建的配置文件。
+### 步骤 2：一键执行全流程
 
 ```
-python run_full_pipeline.py -c my_experiment_config.json
+python run_full_pipeline.py -c configs/config_1.json \
+  --pipeline 1f1b --simulator single_channel \
+  --priority_step 0.1 [--enable-recv-congestion]
 ```
 
-- `-c my_experiment_config.json`: 指定要使用的配置文件。
+- `--pipeline {1f1b,gpipe}`：选择调度策略（默认 1f1b）。
+- `--simulator {single_channel,dual_channel}`：选择可视化布局（兼容 `duel_channel`）。
+- `--priority_step`：共享优先级扫描步长（默认 0.1）。
+- `--enable-recv-congestion`：启用接收端拥塞控制（仅对 1F1B 单通道有效）。
 
-您可以根据需要添加其他可选参数：
+脚本将自动：
 
-- `--simulator dual_channel`: 如果您想使用双通道可视化版本的模拟器核心，可以添加此参数。
-- `--priority_step 0.2`: 如果您想调整优先级扫描的精细度，可以修改此参数。
+1. 并行调用模拟器批量生成 CSV（`outputs/data/*.csv`）。
+2. 按配置分组绘制“总完成时间”热力图（`outputs/heatmaps/*.png`）。
 
-脚本将自动执行以下所有操作：
+### 步骤 3：查看结果
 
-1. 解析您的配置文件。
-2. 调用 `data_generator.py`，利用多核CPU并行运行所有参数组合下的所有优先级场景。
-3. 将所有结果保存在一个带时间戳的CSV文件中（位于 `outputs/data/` 目录下）。
-4. 调用 `plot_heatmap.py`，读取刚刚生成的CSV文件。
-5. 为CSV文件中的每一个独立的环境配置组合，都生成一张对应的热力图。
-6. 将所有热力图保存在 `outputs/heatmaps/` 目录下。
-
-### 步骤 3: 分析结果
-
-实验完成后，您可以到 `outputs/` 目录下查看结果：
-
-- `outputs/data/my_experiment_config_... .csv`: 包含了所有原始模拟数据的CSV文件，每一行都是一次完整的模拟记录。
-- `outputs/heatmaps/`: 这个目录包含了所有生成的热力图，每张图都对应一个特定的环境配置，文件名和标题会清晰地标示出该配置的参数。
+- `outputs/data/*.csv`：排序后的模拟结果表。
+- `outputs/heatmaps/*.png`：每个配置一张热力图。
 
 ## 第4章：高级用法 & 脚本独立解析
 
-对于需要更精细控制或希望理解每个工具独立功能的高级用户，本章将详细解析每个脚本的用法。
+### 4.1 `run_full_pipeline.py`（自动化编排）
 
-### 4.1 `run_full_pipeline.py` (自动化流程管理器)
+```
+python run_full_pipeline.py -c <配置文件> \
+  [--pipeline {1f1b,gpipe}] \
+  [--simulator {single_channel,dual_channel}] \
+  [--priority_step 0.1] [--enable-recv-congestion]
+```
 
-这是推荐的**主入口**，用于一键完成“数据生成”和“热力图绘制”的完整流程。
+### 4.2 `data_generator.py`（数据生成：总时间）
 
-- **用法**:
+```
+python data_generator.py --config <配置文件> \
+  [--pipeline {1f1b,gpipe}] \
+  [--simulator {single_channel,dual_channel}] \
+  [--step 0.1] [--output <csv路径>] [--enable-recv-congestion]
+```
 
-  ```
-  python run_full_pipeline.py -c <配置文件路径> [可选参数]
-  ```
+输出 CSV 列：`n,sync_freq,fwd_len,bwd_len,prop_len,sync_base_len,fwd_impact,bwd_impact,p_fwd_prop,p_grad_prop,p_grad_sync,total_time`
 
-- **参数详解**:
+### 4.3 `plot_heatmap.py`（总时间热力图）
 
-  - `-c, --config` (必需): 指定实验参数配置文件的路径（JSON格式）。
-  - `--simulator` (可选): 选择要使用的模拟器核心。
-    - `'single_channel'` (默认): 使用单通信通道模拟器。
-    - `'dual_channel'`: 使用双通信通道模拟器。
-  - `--priority_step` (可选): 设置普通共享优先级扫描的步长。默认值为 `0.1`。
+```
+python plot_heatmap.py <csv路径> [-o <输出目录>]
+```
 
-### 4.2 `data_generator.py` (数据生成器)
+默认将每个配置绘制为一张热力图，保留独占等级 'a'，对数值做格式化排序。
 
-此脚本的核心功能是根据配置文件，利用多核并行计算，批量生成用于分析的性能数据。
+### 4.4 `schedule_visualizer_*.py`（核心模拟器：单次可视化）
 
-- **用法**:
+各脚本顶部定义默认参数：
 
-  ```
-  python data_generator.py --config <配置文件路径> [可选参数]
-  ```
+- `default_lengths`（任务工作量）
+- `default_priorities`（共享权重）
+- `default_exclusive_tiers`（主动独占等级，'a' > 'b' > ...，`None` 表示共享）
 
-- **参数详解**:
+示例：
 
-  - `--config` (必需): 指定实验参数配置文件的路径（JSON格式）。
-  - `--simulator` (可选): 选择要使用的模拟器核心。
-    - `'single_channel'` (默认): 使用单通信通道模拟器。
-    - `'dual_channel'`: 使用双通信通道模拟器。
-  - `--step` (可选): 设置普通共享优先级扫描的步长。默认值为 `0.1`。
-  - `--output` (可选): 指定输出CSV文件的完整路径。如果未提供，脚本会自动在 `outputs/data/` 目录下生成一个带时间戳的文件名。
+- 1F1B 单通道：
+  - `python schedule_visualizer_1f1b_single_channel.py -n 8 --sync-freq 2 --show-throttling [--enable-recv-congestion]`
+- 1F1B 双通道可视化：
+  - `python schedule_visualizer_1f1b_duel_channel.py -n 8 --sync-freq 2`
+- 1F1B 理想模型：
+  - `python schedule_visualizer_1f1b_ideal.py -n 8 --sync-freq 2`
+- GPipe 单通道：
+  - `python schedule_visualizer_gpipe_single_channel.py -n 8 --sync-freq 2`
+- GPipe 双通道可视化：
+  - `python schedule_visualizer_gpipe_duel_channel.py -n 8 --sync-freq 2`
+- GPipe 理想模型：
+  - `python schedule_visualizer_gpipe_ideal.py -n 8 --sync-freq 2`
 
-### 4.3 `plot_heatmap.py` (性能可视化器)
+提示：单/双通道脚本的差异主要在可视化布局；带宽分配与拥塞控制的核心逻辑保持一致。
 
-此脚本用于将 `data_generator.py` 生成的CSV数据文件，批量转换为热力图。
+### 4.5 `generate_metrics.py`（多指标数据）
 
-- **用法**:
+```
+python generate_metrics.py --config <配置文件> \
+  [--pipeline {1f1b,gpipe}] \
+  [--simulator {single_channel,dual_channel}] \
+  [--step 0.1] [--output <csv路径>] [--enable-recv-congestion]
+```
 
-  ```
-  python plot_heatmap.py <CSV文件路径> [可选参数]
-  ```
+新增指标列：`compute_ratio,comm_ratio,avg_throughput,avg_latency,compute_utilization,comm_utilization`
 
-- **参数详解**:
+### 4.6 `plot_metrics_heatmaps.py`（多指标热力图）
 
-  - `csv_file` (必需): 这是一个**位置参数**，直接提供由 `data_generator.py` 生成的CSV数据文件路径。
-  - `-o, --output_dir` (可选): 指定一个目录，用于保存所有生成的热力图。默认值为 `'./heatmaps_output'`。
+```
+python plot_metrics_heatmaps.py --csv <一个或多个csv> \
+  [--metrics total_time avg_latency compute_utilization ...] \
+  [--outdir <输出目录>] [--vmin <下限>] [--vmax <上限>] [--show]
+```
 
-### 4.4 `schedule_visualizer_*.py` (核心模拟器)
+未显式指定 `--outdir` 时，默认按照 CSV 名称生成 `./outputs/metrics_<csv名>/` 目录保存热力图。
 
-这两个脚本用于对**单个**参数配置进行一次完整的模拟和可视化，直接生成甘特图。**注意：** 它们的优先级配置是直接在代码开头的全局定义中**硬编码**的，修改后才能生效。
+### 4.7 `make_network_load_plots.py`（网络负载曲线）
 
-- **用法**:
+```
+python make_network_load_plots.py --mode {gpipe,1f1b,both} \
+  -n 8 --sync-freq 2 [--enable-recv-congestion]
+```
 
-  ```
-  python schedule_visualizer_single_channel.py [可选参数]
-  ```
+输出：`network_load_gpipe_single.png`、`network_load_1f1b_single_no_congestion.png`/`_with_congestion.png`
 
-- **参数详解**:
+## 第5章：联动方式与代码结构
 
-  - `-n, --num_groups` (可选): 设置 micro-batch 的数量。默认值为 `8`。
-  - `--fwd-impact` (可选): 设置 `grad_sync` 对 `forward` 计算的性能影响因子。默认值为 `0.2`。
-  - `--bwd-impact` (可选): 设置 `grad_sync` 对 `backward` 计算的性能影响因子。默认值为 `0.2`。
-  - `--sync-solo-w` (可选): **[遗留参数]** 设置当 `grad_sync` 任务单独运行时允许占用的资源份额。在当前的优先级系统中，此参数已无实际作用。默认值为 `1.0`。
-  - `--sync-freq` (可选): 设置梯度累积的步数（即每多少次反向计算后进行一次梯度同步）。默认值为 `1`。
-  - `--no-show` (可选): 这是一个开关参数。如果使用，脚本将只保存图表而不弹出显示。
-  - `--show-throttling` (可选): 这是一个开关参数。如果使用，将在甘特图上用红色边框高亮显示被网络拥塞影响的通信任务。
-  - `--show-completion-time` (可选): 这是一个开关参数。如果使用，将在总览图的GPU 1上用红色虚线标注总完成时间。
+典型联动流程：
 
-## 第5章：代码结构与联动方式总结
+run_full_pipeline.py（起点）
 
-### 联动流程
+-> 调用 data_generator.py（并行生成 CSV）
 
-整个工具链的联动方式如同一条清晰的流水线：
+-> 导入并调用 schedule_visualizer_{1f1b|gpipe}_{single|duel}.py 的 `calculate_full_pipeline_schedule`
 
-run_full_pipeline.py (起点)
+-> 输出 `outputs/data/<config>_<timestamp>.csv`
 
--> 调用 data_generator.py
+-> 调用 plot_heatmap.py（按配置分组绘制 total_time 热力图）
 
--> 读取 config.json
+-> 输出 `outputs/heatmaps/heatmap_*.png`
 
--> 并行调用 schedule_visualizer_*.py 中的 calculate_full_pipeline_schedule 函数进行成千上万次模拟
+可选链路：
 
--> 输出 results.csv
+- generate_metrics.py -> 输出多指标 CSV -> plot_metrics_heatmaps.py -> 输出指标热力图
+- make_network_load_plots.py -> 输出网络负载曲线 PNG
 
--> 调用 plot_heatmap.py
-
--> 读取 results.csv
-
--> 批量生成 heatmap_*.png
-
-`calculate_full_pipeline_schedule` 函数是整个系统的**计算核心**，它被 `data_generator.py` 作为最底层的“计算单元”反复调用，而 `run_full_pipeline.py` 则是最高层的“指挥官”，负责协调和自动化整个流程。
+命名说明：仓库中 duel/dual 的差异仅为历史拼写问题；CLI 参数与脚本均已兼容。

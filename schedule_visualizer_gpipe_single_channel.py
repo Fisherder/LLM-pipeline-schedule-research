@@ -60,16 +60,16 @@ default_lengths = {
 default_priorities = {
     'forward': 1,
     'backward': 1,
-    'fwd_prop': 0.5,
-    'grad_prop': 0.5,
-    'grad_sync': 0.5,
+    'fwd_prop': 1.0,
+    'grad_prop': 1,
+    'grad_sync': 0,
     'param_sync': 1
 }
 
 # 主动独占任务的优先级等级；字母序越靠前优先级越高。None 表示普通共享任务。
 default_exclusive_tiers = {
     'fwd_prop': None,
-    'grad_prop': None,
+    'grad_prop': 'a',
     'grad_sync': None,
 }
 

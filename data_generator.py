@@ -51,6 +51,20 @@ def run_single_simulation(args_tuple):
             for task in sharing_tasks:
                 final_priorities[task] = safe_priorities[task] / total_safe_p
 
+    # 为 1f1b 脚本动态传递 use_recv_congestion 参数（根据环境变量）。
+    extra_kwargs = {}
+    try:
+        import inspect
+        sig = inspect.signature(sim.calculate_full_pipeline_schedule)
+        # 从环境变量读取当前流水线类型和拥塞控制开关
+        pipeline_type = os.environ.get('PIPELINE_TYPE', '1f1b')
+        enable_cc = os.environ.get('ENABLE_RECV_CONGESTION', '0') == '1'
+        if 'use_recv_congestion' in sig.parameters:
+            # 仅对 1f1b 管道有效
+            extra_kwargs['use_recv_congestion'] = enable_cc
+    except Exception:
+        pass
+
     _, total_time, _ = sim.calculate_full_pipeline_schedule(
         n=current_params['n'],
         num_gpus=4,
@@ -61,7 +75,8 @@ def run_single_simulation(args_tuple):
         fwd_impact=current_params['fwd_impact'],
         bwd_impact=current_params['bwd_impact'],
         sync_solo_w=1.0,
-        sync_freq=current_params['sync_freq']
+        sync_freq=current_params['sync_freq'],
+        **extra_kwargs
     )
 
     output_priorities = {}
@@ -160,24 +175,38 @@ def generate_data_for_fitting(simulator_module_name, output_file, param_grid, pr
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='为流水线模拟器生成拟合数据。')
-    parser.add_argument('--simulator', type=str, choices=['single_channel', 'dual_channel'], default='single_channel')
-    parser.add_argument('--step', type=float, default=DEFAULT_PRIORITY_STEP)
+    # 支持单通道/双通道可视化选择。注意：旧版本的文件名中 "dual" 实际拼写为 "duel"，此处兼容两者。
+    parser.add_argument('--simulator', type=str, choices=['single_channel', 'dual_channel', 'duel_channel'], default='single_channel',
+                        help='通信通道类型: single_channel 表示单通道, dual/duel_channel 表示双通道')
+    parser.add_argument('--pipeline', type=str, choices=['1f1b', 'gpipe'], default='1f1b',
+                        help='流水线调度策略: 1f1b 或 gpipe')
+    parser.add_argument('--step', type=float, default=DEFAULT_PRIORITY_STEP,
+                        help='共享优先级扫描步长 (默认 0.1)')
     parser.add_argument('--config', type=str, required=True, help="JSON 格式的参数配置文件路径")
     parser.add_argument('--output', type=str, default=None, help='输出CSV文件路径 (默认自动命名)')
+    parser.add_argument('--enable-recv-congestion', action='store_true',
+                        help='开启接收端拥塞控制 (仅对 1f1b 单通道脚本有效)')
 
     args = parser.parse_args()
 
+    # 处理 dual/duel 名称差异，统一映射到实际文件名拼写
+    simulator_name = args.simulator
+    if simulator_name == 'dual_channel':
+        simulator_name = 'duel_channel'
+
+    # 构建模拟器模块名，例如 schedule_visualizer_1f1b_single_channel 或 schedule_visualizer_gpipe_duel_channel
+    sim_module_name = f'schedule_visualizer_{args.pipeline}_{simulator_name}'
     try:
-        sim_module_name = f'schedule_visualizer_{args.simulator}'
         importlib.import_module(sim_module_name)
         print(f"# --- 使用模拟器: {sim_module_name}.py ---")
         print(f"# --- 优先级扫描步长: {args.step} ---")
     except ImportError as e:
-        print(f"错误: 无法导入模拟器模块 '{e.name}'")
+        print(f"错误: 无法导入模拟器模块 '{e.name}'. 请检查 --pipeline 和 --simulator 参数是否正确。")
         exit(1)
 
     param_grid = load_param_grid_from_json(args.config)
 
+    # 生成输出文件名
     if args.output:
         output_file = args.output
     else:
@@ -185,5 +214,12 @@ if __name__ == '__main__':
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = f"outputs/data/{config_name}_{timestamp}.csv"
 
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    # 当指定文件路径不包含目录时，os.path.dirname 可能返回空字符串，这会导致 makedirs 抛出异常
+    out_dir = os.path.dirname(output_file)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    # 调用生成函数。此处将接收端拥塞控制选项打包到环境变量中供 run_single_simulation 检索。
+    # 由于 multiprocessing 不能直接将复杂对象传入，需要使用全局变量或环境变量传递。
+    os.environ['PIPELINE_TYPE'] = args.pipeline
+    os.environ['ENABLE_RECV_CONGESTION'] = '1' if args.enable_recv_congestion else '0'
     generate_data_for_fitting(sim_module_name, output_file, param_grid, args.step)

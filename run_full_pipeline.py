@@ -20,14 +20,26 @@ def main():
         '--simulator',
         type=str,
         default='single_channel',
-        choices=['single_channel', 'dual_channel'],
-        help='模拟器选择（默认: single_channel）'
+        choices=['single_channel', 'dual_channel', 'duel_channel'],
+        help='通信通道类型: single_channel 或 dual/duel_channel'
+    )
+    parser.add_argument(
+        '--pipeline',
+        type=str,
+        default='1f1b',
+        choices=['1f1b', 'gpipe'],
+        help='选择流水线调度策略: 1f1b 或 gpipe'
     )
     parser.add_argument(
         '--priority_step',
         type=float,
         default=0.1,
         help='优先级扫描步长（默认: 0.1）'
+    )
+    parser.add_argument(
+        '--enable-recv-congestion',
+        action='store_true',
+        help='开启 1f1b 单通道的接收端拥塞控制 (适用于 1.3 阶段)' 
     )
     args = parser.parse_args()
 
@@ -62,13 +74,19 @@ def main():
     # 调用 data_generator.py
     print(f"\n[1/2] 🔧 正在生成数据: {output_csv}")
     try:
-        subprocess.run([
-            sys.executable, 'data_generator.py',
-            '--config', temp_param_file,
-            '--simulator', args.simulator,
-            '--step', str(args.priority_step),
-            '--output', output_csv
-        ], check=True)
+        # 统一 dual/duel 名称传递给 data_generator，并追加 pipeline 和接收端拥塞控制参数
+        sim_name = args.simulator
+        if sim_name == 'dual_channel':
+            sim_name = 'duel_channel'
+        cmd = [sys.executable, 'data_generator.py',
+               '--config', temp_param_file,
+               '--simulator', sim_name,
+               '--pipeline', args.pipeline,
+               '--step', str(args.priority_step),
+               '--output', output_csv]
+        if args.enable_recv_congestion:
+            cmd.append('--enable-recv-congestion')
+        subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError:
         print("❌ data_generator.py 执行失败！")
         if os.path.exists(temp_param_file):

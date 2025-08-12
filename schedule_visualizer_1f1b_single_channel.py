@@ -1,4 +1,4 @@
-# 文件名: schedule_visualizer_single_channel.py
+# 文件名: schedule_visualizer_1f1b_single_channel.py
 # 描述: 这是一个为了对比可视化方案而创建的版本。
 #       它的核心计算逻辑与双通道版本完全相同（包含接收端拥塞控制），
 #       但绘图逻辑被修改，将所有通信任务绘制在单一的“通信”通道中，以最真实地反映物理资源竞争。
@@ -43,7 +43,7 @@ default_exclusive_tiers = {
 
 
 # --- 核心模拟与计算函数 ---
-def calculate_full_pipeline_schedule(n, num_gpus, is_ideal, lengths, priorities, exclusive_tiers, fwd_impact, bwd_impact, sync_solo_w=1.0, sync_freq=1):
+def calculate_full_pipeline_schedule(n, num_gpus, is_ideal, lengths, priorities, exclusive_tiers, fwd_impact, bwd_impact, sync_solo_w=1.0, sync_freq=1, use_recv_congestion=True):
     all_tasks = []
     
     # --- 1. 创建所有任务 (使用统一的通信通道进行计算) ---
@@ -187,58 +187,72 @@ def calculate_full_pipeline_schedule(n, num_gpus, is_ideal, lengths, priorities,
                     tasks_to_set_running.extend(tasks_for_allocation)
 
         # --- 拥塞控制: 迭代稳定循环 ---
-        for _ in range(num_gpus * 2):
-            for receiver_j in range(1, num_gpus - 1):
-                incoming_fwd_tasks = [t for t in active_tasks if t['type'] == 'fwd_prop' and t['id'][2] == receiver_j - 1]
-                incoming_grad_tasks = [t for t in active_tasks if t['type'] == 'grad_prop' and t['id'][2] == receiver_j + 1]
-                
-                total_incoming_w = sum(shares_now.get(t['id'], 0) for t in incoming_fwd_tasks + incoming_grad_tasks)
-                
-                if total_incoming_w > W_UNIT:
-                    scale = W_UNIT / total_incoming_w
-                    for t in incoming_fwd_tasks + incoming_grad_tasks:
-                        if t['id'] in shares_now:
-                            shares_now[t['id']] *= scale
-                            t['bw_fixed'] = True
-                            throttled_task_ids.add(t['id'])
+        # 根据 use_recv_congestion 参数决定是否执行接收端拥塞控制逻辑。如果禁用，则跳过此循环，
+        # 从而让通信任务仅受带宽共享和独占逻辑影响，不再基于接收端的流量限制调整带宽。
+        if use_recv_congestion:
+            for _ in range(num_gpus * 2):
+                # 1. 检查各接收端的入站流量是否超过容量，并按比例缩减
+                for receiver_j in range(1, num_gpus - 1):
+                    incoming_fwd_tasks = [t for t in active_tasks if t['type'] == 'fwd_prop' and t['id'][2] == receiver_j - 1]
+                    incoming_grad_tasks = [t for t in active_tasks if t['type'] == 'grad_prop' and t['id'][2] == receiver_j + 1]
+                    
+                    total_incoming_w = sum(shares_now.get(t['id'], 0) for t in incoming_fwd_tasks + incoming_grad_tasks)
+                    
+                    if total_incoming_w > W_UNIT:
+                        scale = W_UNIT / total_incoming_w
+                        for t in incoming_fwd_tasks + incoming_grad_tasks:
+                            if t['id'] in shares_now:
+                                shares_now[t['id']] *= scale
+                                t['bw_fixed'] = True
+                                throttled_task_ids.add(t['id'])
 
-            for sender_j in range(num_gpus):
-                comm_ch = sender_j * 2 + 1
-                sending_tasks = [t for t in active_tasks if t['channel'] == comm_ch and t['id'][2] == sender_j]
-                if not sending_tasks: continue
+                # 2. 对每个发送端重新分配剩余带宽
+                for sender_j in range(num_gpus):
+                    comm_ch = sender_j * 2 + 1
+                    sending_tasks = [t for t in active_tasks if t['channel'] == comm_ch and t['id'][2] == sender_j]
+                    if not sending_tasks:
+                        continue
 
-                fixed_w = sum(shares_now.get(t['id'], 0) for t in sending_tasks if t.get('bw_fixed'))
-                unallocated_w = W_UNIT - fixed_w
-                
-                unfixed_tasks = [t for t in sending_tasks if not t.get('bw_fixed')]
-                if not unfixed_tasks or unallocated_w < 1e-9: continue
-                
-                # [MODIFIED] 确保带宽重分配也遵循独占逻辑
-                exclusive_unfixed = []
-                sharing_unfixed = []
-                zero_prio_unfixed = []
-                for t in unfixed_tasks:
-                    if exclusive_tiers.get(t['type']) is not None: exclusive_unfixed.append(t)
-                    elif priorities.get(t['type'], 0) > 1e-9: sharing_unfixed.append(t)
-                    else: zero_prio_unfixed.append(t)
+                    fixed_w = sum(shares_now.get(t['id'], 0) for t in sending_tasks if t.get('bw_fixed'))
+                    unallocated_w = W_UNIT - fixed_w
+                    
+                    unfixed_tasks = [t for t in sending_tasks if not t.get('bw_fixed')]
+                    if not unfixed_tasks or unallocated_w < 1e-9:
+                        continue
+                    
+                    # 保证重分配逻辑遵循独占优先级
+                    exclusive_unfixed = []
+                    sharing_unfixed = []
+                    zero_prio_unfixed = []
+                    for t in unfixed_tasks:
+                        if exclusive_tiers.get(t['type']) is not None:
+                            exclusive_unfixed.append(t)
+                        elif priorities.get(t['type'], 0) > 1e-9:
+                            sharing_unfixed.append(t)
+                        else:
+                            zero_prio_unfixed.append(t)
 
-                if exclusive_unfixed:
-                    exclusive_unfixed.sort(key=lambda t: exclusive_tiers[t['type']])
-                    winner = exclusive_unfixed[0]
-                    for t in unfixed_tasks: shares_now[t['id']] = unallocated_w if t == winner else 0
-                elif sharing_unfixed:
-                    tasks_by_type = defaultdict(list)
-                    for task in sharing_unfixed: tasks_by_type[task['type']].append(task)
-                    type_priorities = {t: priorities.get(t, 0) for t in tasks_by_type.keys()}
-                    total_p = sum(type_priorities.values())
-                    if total_p > 0:
-                        for task_type, tasks in tasks_by_type.items():
-                            share_for_type = unallocated_w * (type_priorities[task_type] / total_p)
-                            share_per_task = share_for_type / len(tasks)
-                            for task in tasks: shares_now[task['id']] = share_per_task
-                elif zero_prio_unfixed:
-                    share_per_task = unallocated_w / len(zero_prio_unfixed)
-                    for task in zero_prio_unfixed: shares_now[task['id']] = share_per_task
+                    if exclusive_unfixed:
+                        exclusive_unfixed.sort(key=lambda t: exclusive_tiers[t['type']])
+                        winner = exclusive_unfixed[0]
+                        for t in unfixed_tasks:
+                            shares_now[t['id']] = unallocated_w if t == winner else 0
+                    elif sharing_unfixed:
+                        tasks_by_type = defaultdict(list)
+                        for task in sharing_unfixed:
+                            tasks_by_type[task['type']].append(task)
+                        type_priorities = {t: priorities.get(t, 0) for t in tasks_by_type.keys()}
+                        total_p = sum(type_priorities.values())
+                        if total_p > 0:
+                            for task_type, tasks in tasks_by_type.items():
+                                share_for_type = unallocated_w * (type_priorities[task_type] / total_p)
+                                share_per_task = share_for_type / len(tasks)
+                                for task in tasks:
+                                    shares_now[task['id']] = share_per_task
+                    elif zero_prio_unfixed:
+                        share_per_task = unallocated_w / len(zero_prio_unfixed)
+                        for task in zero_prio_unfixed:
+                            shares_now[task['id']] = share_per_task
 
         for task in all_tasks:
             if 'bw_fixed' in task: del task['bw_fixed']
@@ -507,10 +521,11 @@ if __name__ == '__main__':
     parser.add_argument('--fwd-impact', type=float, default=0.2, help='Impact of sync on forward compute.')
     parser.add_argument('--bwd-impact', type=float, default=0.2, help='Impact of sync on backward compute.')
     parser.add_argument('--sync-solo-w', type=float, default=1.0, help='Resource share for a solo sync task.')
-    parser.add_argument('--sync-freq', type=int, default=1, help='Frequency of grad_sync tasks.')
+    parser.add_argument('--sync-freq', type=int, default=2, help='Frequency of grad_sync tasks.')
     parser.add_argument('--no-show', action='store_true', help='Save chart without displaying it.')
     parser.add_argument('--show-throttling', action='store_true', help='Highlight communication tasks throttled by receiver congestion.')
     parser.add_argument('--show-completion-time', action='store_true', help='Show the completion time annotation on the total chart.') 
+    parser.add_argument('--enable-recv-congestion', action='store_true', help='Enable receiver-side congestion control. By default it is disabled for resource contention experiments.')
     
     args = parser.parse_args()
     
@@ -529,7 +544,8 @@ if __name__ == '__main__':
         fwd_impact=args.fwd_impact,
         bwd_impact=args.bwd_impact,
         sync_solo_w=args.sync_solo_w,
-        sync_freq=args.sync_freq
+        sync_freq=args.sync_freq,
+        use_recv_congestion=args.enable_recv_congestion
     )
     
     # 为每个GPU生成并保存分图（不显示）
