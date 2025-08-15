@@ -9,6 +9,18 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from matplotlib import rcParams
+
+# Use larger Times New Roman fonts globally
+rcParams.update({
+    'font.family': 'Times New Roman',
+    'font.size': 14,
+    'axes.titlesize': 18,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 14,
+})
 
 # 要绘制的指标；CSV缺哪个就自动跳过
 DEFAULT_METRICS = [
@@ -115,9 +127,9 @@ def plot_single_heatmap(df_group: pd.DataFrame,
     )
 
     title = ", ".join([f"{k}={v}" for k, v in config_dict.items()])
-    plt.title(f"{metric} | config: {title}", fontsize=14)
-    plt.xlabel("p_grad_prop")
-    plt.ylabel("p_fwd_prop")
+    plt.title(f"{metric} | config: {title}", fontsize=18)
+    plt.xlabel("p_grad_prop", fontsize=16)
+    plt.ylabel("p_fwd_prop", fontsize=16)
 
     # 用红色标记最优格（红色边框矩形）
     best = _best_cell(table, metric)

@@ -15,6 +15,18 @@ python make_network_load_plots.py --mode both -n 8 --sync-freq 2
 import argparse
 from typing import Dict, List, Tuple
 import matplotlib.pyplot as plt
+from matplotlib import rcParams
+
+# Use larger Times New Roman fonts globally
+rcParams.update({
+    'font.family': 'Times New Roman',
+    'font.size': 14,
+    'axes.titlesize': 20,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 14,
+})
 
 def compute_network_load(blocks: List[Dict]) -> Tuple[List[float], Dict[str, List[float]]]:
     """从调度 blocks 统计通信带宽随时间的占用（单通道场景）。"""
@@ -49,10 +61,10 @@ def plot_network_load(times: List[float], loads: Dict[str, List[float]], title: 
     plt.plot(times, loads["fwd_prop"], label="Fwd Prop",  color="#87ceeb")  # 天蓝
     plt.plot(times, loads["grad_prop"], label="Grad Prop", color="#c8a2c8")  # 紫
     plt.plot(times, loads["grad_sync"], label="Grad Sync", color="#fffacd")  # 浅黄
-    plt.xlabel("Time")
-    plt.ylabel("Aggregated Bandwidth Usage")
-    plt.title(title)
-    plt.legend(loc="upper right")
+    plt.xlabel("Time", fontsize=16)
+    plt.ylabel("Aggregated Bandwidth Usage", fontsize=16)
+    plt.title(title, fontsize=20)
+    plt.legend(loc="upper right", fontsize=14)
     plt.tight_layout()
     plt.savefig(outfile)
     plt.close()

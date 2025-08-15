@@ -25,6 +25,18 @@
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib import rcParams
+
+# Use larger Times New Roman fonts globally
+rcParams.update({
+    'font.family': 'Times New Roman',
+    'font.size': 14,
+    'axes.titlesize': 20,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 14,
+})
 import argparse
 from fractions import Fraction
 from copy import deepcopy
@@ -420,11 +432,11 @@ def plot_single_gpu_chart(gpu_rank, all_blocks, total_time, throttled_task_ids, 
     num_channels = 2
     visual_layout_labels = ["Compute", "Communication"]
     fig, ax = plt.subplots(1, 1, figsize=(22, 2.5 * num_channels))
-    fig.suptitle(f"GPU {gpu_rank + 1} - GPipe F-then-B Schedule (Single Comm Visualization)", fontsize=16, y=0.98)
-    ax.set_ylabel("Resource Channels", fontsize=12)
+    fig.suptitle(f"GPU {gpu_rank + 1} - GPipe F-then-B Schedule (Single Comm Visualization)", fontsize=20, y=0.98)
+    ax.set_ylabel("Resource Channels", fontsize=16)
     ax.set_ylim(0, num_channels)
     ax.set_yticks([i + 0.5 for i in range(num_channels)])
-    ax.set_yticklabels(visual_layout_labels, fontsize=10)
+    ax.set_yticklabels(visual_layout_labels, fontsize=14)
     ax.grid(axis='x', linestyle='--', alpha=0.7)
     y_map = {
         gpu_rank * 2 + 0: 0,  # Compute
@@ -467,12 +479,12 @@ def plot_single_gpu_chart(gpu_rank, all_blocks, total_time, throttled_task_ids, 
                 current_segment = [block]
         if current_segment:
             draw_polygon_for_segment(ax, current_segment, throttled_task_ids, show_throttling)
-    ax.set_xlabel("Time", fontsize=12)
+    ax.set_xlabel("Time", fontsize=16)
     ax.set_xlim(0, total_time * 1.05)
-    plt.xticks(np.arange(0, int(total_time * 1.05) + 2, 2), fontsize=10)
+    plt.xticks(np.arange(0, int(total_time * 1.05) + 2, 2), fontsize=14)
     legend_patches = [mpatches.Patch(color=c, label=t.replace('_', ' ').title()) for t, c in colors.items()]
     fig.legend(handles=legend_patches, loc='lower center', bbox_to_anchor=(0.5, -0.15 / num_channels if num_channels > 1 else -0.2),
-               ncol=len(colors), fontsize=12)
+               ncol=len(colors), fontsize=16)
     plt.tight_layout(rect=[0, 0.1, 1, 0.9])
     output_filename = f'pipeline_schedule_gpu_{gpu_rank + 1}_gpipe_single_channel_viz.png'
     plt.savefig(output_filename, dpi=150)
@@ -519,7 +531,7 @@ def draw_polygon_for_segment(ax, segment, throttled_task_ids, show_throttling):
 def plot_total_pipeline_chart(all_blocks, total_time, num_gpus, throttled_task_ids, show_throttling, show_completion_time, show_plot):
     """绘制所有 GPU 的整体时间轴，用于观察流水线全貌。"""
     fig, axes = plt.subplots(num_gpus, 1, figsize=(22, 2.5 * num_gpus), sharex=True, gridspec_kw={'hspace': 0})
-    fig.suptitle("Total GPipe F-then-B Pipeline Schedule (Single Comm Visualization)", fontsize=20, y=0.95)
+    fig.suptitle("Total GPipe F-then-B Pipeline Schedule (Single Comm Visualization)", fontsize=24, y=0.95)
     for gpu_rank in range(num_gpus):
         ax = axes[gpu_rank]
         blocks_for_gpu = [b for b in all_blocks if b['id'][2] == gpu_rank]
@@ -529,10 +541,10 @@ def plot_total_pipeline_chart(all_blocks, total_time, num_gpus, throttled_task_i
         }
         visual_layout_labels = ["Compute", "Communication"]
         num_channels = 2
-        ax.set_ylabel(f"GPU {gpu_rank + 1}", fontsize=14, rotation=0, labelpad=40, va='center')
+        ax.set_ylabel(f"GPU {gpu_rank + 1}", fontsize=18, rotation=0, labelpad=40, va='center')
         ax.set_ylim(0, num_channels)
         ax.set_yticks([i + 0.5 for i in range(num_channels)])
-        ax.set_yticklabels(visual_layout_labels, fontsize=10)
+        ax.set_yticklabels(visual_layout_labels, fontsize=14)
         ax.grid(axis='x', linestyle='--', alpha=0.7)
         if not blocks_for_gpu:
             continue
@@ -571,7 +583,7 @@ def plot_total_pipeline_chart(all_blocks, total_time, num_gpus, throttled_task_i
                     current_segment = [block]
             if current_segment:
                 draw_polygon_for_segment(ax, current_segment, throttled_task_ids, show_throttling)
-    axes[-1].set_xlabel("Time", fontsize=14)
+    axes[-1].set_xlabel("Time", fontsize=18)
     plt.xlim(0, total_time * 1.05)
     plt.xticks(np.arange(0, int(total_time * 1.05) + 2, 2), fontsize=10)
     if show_completion_time:
@@ -583,7 +595,7 @@ def plot_total_pipeline_chart(all_blocks, total_time, num_gpus, throttled_task_i
                     arrowprops=dict(facecolor='red', shrink=0.05, width=1, headwidth=8),
                     ha='center', va='bottom', fontsize=12, color='red', zorder=6)
     legend_patches = [mpatches.Patch(color=c, label=t.replace('_', ' ').title()) for t, c in colors.items()]
-    fig.legend(handles=legend_patches, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=len(colors), fontsize=12)
+    fig.legend(handles=legend_patches, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=len(colors), fontsize=16)
     plt.tight_layout(rect=[0, 0.05, 1, 0.93])
     output_filename = 'pipeline_schedule_total_gpipe_single_channel_viz.png'
     plt.savefig(output_filename, dpi=150)

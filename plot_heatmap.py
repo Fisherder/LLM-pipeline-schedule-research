@@ -1,6 +1,18 @@
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+from matplotlib import rcParams
+ 
+# Use larger Times New Roman fonts globally
+rcParams.update({
+    'font.family': 'Times New Roman',
+    'font.size': 14,
+    'axes.titlesize': 18,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 14,
+})
 import os
 import numpy as np
 import sys
@@ -54,9 +66,9 @@ def plot_single_heatmap(df_group, config_dict, output_dir, show_plot=True):
     )
 
     title = ', '.join([f"{k}={v}" for k, v in config_dict.items()])
-    plt.title(f"Heatmap for config: {title}", fontsize=14)
-    plt.xlabel("p_grad_prop")
-    plt.ylabel("p_fwd_prop")
+    plt.title(f"Heatmap for config: {title}", fontsize=18)
+    plt.xlabel("p_grad_prop", fontsize=16)
+    plt.ylabel("p_fwd_prop", fontsize=16)
 
     filename = '_'.join([f"{k}-{v}" for k, v in config_dict.items()])
     filepath = os.path.join(output_dir, f"heatmap_{filename}.png")
